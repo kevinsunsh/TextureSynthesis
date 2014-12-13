@@ -1,0 +1,134 @@
+#ifndef _ANALYZER_H__
+#define _ANALYZER_H__
+
+
+#include <OpenImageIO/imagebuf.h>
+#include <OpenEXR/ImathVec.h>
+#include <vector>
+
+#include "ImageStack.h"
+
+OIIO_NAMESPACE_USING
+#define N 5
+#define K 8
+
+class Analyzer
+{
+public:
+  class KNearest
+  {
+  public:
+    KNearest()
+    {
+      for (int i = 0; i < K; ++i)
+      {
+        coords[i] = Imath::V2s(-1, -1);
+      }
+    }
+    Imath::V2s coords[K];
+  };
+
+  class Neighborhood
+  {
+  public:
+    Neighborhood(){}
+    Neighborhood(const Neighborhood& nb)
+    {
+      *this=nb;
+    }
+
+    static void ForNeighborhood(std::function<void(int)> func)
+    {
+      for (int i = 0; i < N*N; ++i)
+      {
+        func(i);
+      }
+    }
+
+    const Neighborhood& operator=(const Neighborhood &nb)
+    {
+      ForNeighborhood([=](int i)->void {
+            pixel[i] = nb.pixel[i];
+        }
+      );
+      //for (int i = 0; i < N*N; ++i)
+      //{
+      //  pixel[i] = nb.pixel[i];
+      //}
+      return *this;
+    }
+
+    Imath::V3f pixel[N*N];
+
+    Neighborhood
+    operator - (const Neighborhood &v) const
+    {
+      Neighborhood ret(*this);
+      for (int i = 0; i < N*N; ++i)
+      {
+        ret.pixel[i] -= v.pixel[i];
+      }
+
+      return ret;
+    }
+
+    float sqLength()
+    {
+      float sum = 0.0f;
+      for (int i = 0; i < N*N; ++i)
+      {
+        sum += pixel[i].length2();
+      }
+      return sum;
+    }
+  };
+  static void analyzeLevel(int level, Analyzer* theAnalyzer);
+private:
+  //std::string                               m_Name;          // Exemplar name
+  ImageBuf*                                              m_Exemplar;      // Exemplar image
+  ImageStack*                                 m_Stack;         // Exemplar stack, computed from the image
+  std::vector<std::vector<KNearest> >     m_KNearests;     // k-most similar neighborhoods within same exemplar stack level
+  std::vector<std::vector<Neighborhood> > m_Neighborhoods; // All neighborhoods (pre-gathered for efficiency)
+  int                                                    m_NumThreads;    // Number of threads to be used
+
+  //! analyzes the exemplar stack, level per level
+  void analyzeStack();
+  //! analyzes one exemplar stack level
+  void analyzeStackLevel  (int l);
+  //! gathers all neighborhoods of the exemplar stack level
+  void gatherNeighborhoods(int l, std::vector<Neighborhood>& _neighs);
+  //! gathers neighborhood at i,j in the stack level l
+  Neighborhood gatherNeighborhood (int l,int i,int j) const;
+  
+  void GenPyramidsEx();
+
+public:
+  
+  /**
+  Constructor - takes exemplar name and image as input
+  */
+  Analyzer(ImageBuf* ex);
+  ~Analyzer();
+
+  /**
+  Runs analysis. Ideally the result would be saved for later reuse. In this 
+  simple implementation nothing gets saved.
+  */
+  void  run();
+
+  /**
+  Returns the neighborhood at i,j in the stack level l. This is using pre-gathered neighborhoods.
+  It is meant to be called after analysis, during synthesis.
+  */
+  const Neighborhood& neighborhoodAt(int l, int i, int j) const;
+
+  /**
+  Accessors
+  */
+
+  const ImageBuf*                            ex()    { return (m_Exemplar);  }
+  const ImageStack*         stack() { return (m_Stack);     }
+  const std::vector<std::vector<KNearest> >& kNrst() { return (m_KNearests); }
+};
+
+#endif // _ANALYZER_H__
